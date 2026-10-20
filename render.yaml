@@ -1,0 +1,34 @@
+# Render blueprint — one-click deploy of both services (free tier).
+# Docs: https://render.com/docs/blueprint-spec
+# After the first deploy, set VITE_API_BASE on the frontend service to
+# https://<your-backend-host>/api and redeploy it (see README → Deploy).
+services:
+  - type: web
+    name: routeguard-api
+    env: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn config.wsgi:application
+    envVars:
+      - key: DJANGO_DEBUG
+        value: "0"
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: ALLOWED_HOSTS
+        value: "*"
+      - key: PYTHON_VERSION
+        value: 3.12.3
+
+  - type: web
+    name: routeguard-web
+    env: static
+    rootDir: frontend
+    plan: free
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      # Replace with the real backend URL after the API service deploys,
+      # e.g. https://routeguard-api.onrender.com/api
+      - key: VITE_API_BASE
+        value: https://routeguard-api.onrender.com/api

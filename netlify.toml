@@ -1,0 +1,7 @@
+# Netlify (alternative frontend host) — place at repo root; the app lives
+# in frontend/. Set VITE_API_BASE in the Netlify UI (Site settings →
+# Environment variables) to https://<your-backend-host>/api before deploying.
+[build]
+  base = "frontend"
+  command = "npm run build"
+  publish = "dist"
