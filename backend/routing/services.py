@@ -7,7 +7,7 @@ Third-party integrations — all free, no API keys required.
              points — still real OSRM-computed routes, deduplicated by
              corridor overlap (see services.fetch_routes).
 - Weather:   Open-Meteo forecast API (hourly wind/precip/snow, imperial units)
-- Geocoding: Nominatim (OpenStreetMap)
+- Geocoding: Photon (Komoot, OSM-based) with Nominatim fallback
 """
 import math
 from datetime import datetime, timedelta, timezone
@@ -21,8 +21,26 @@ HEADERS = {"User-Agent": settings.NOMINATIM_UA}
 
 
 # ---------------------------------------------------------------- geocoding
-def geocode(query: str, limit: int = 5) -> list[dict]:
-    """Free-text place search -> [{label, lat, lon}]."""
+def _geocode_photon(query: str, limit: int) -> list[dict]:
+    """Photon (Komoot) geocoder — free, no key, tolerant rate limits."""
+    resp = requests.get(
+        "https://photon.komoot.io/api/",
+        params={"q": query, "limit": limit},
+        headers=HEADERS,
+        timeout=15,
+    )
+    resp.raise_for_status()
+    out = []
+    for f in resp.json().get("features", []):
+        p = f.get("properties", {})
+        lon, lat = f["geometry"]["coordinates"]
+        parts = [p.get("name"), p.get("city"), p.get("state"), p.get("country")]
+        label = ", ".join(dict.fromkeys(x for x in parts if x))
+        out.append({"label": label, "lat": float(lat), "lon": float(lon)})
+    return out
+
+
+def _geocode_nominatim(query: str, limit: int) -> list[dict]:
     resp = requests.get(
         settings.NOMINATIM_URL,
         params={"q": query, "format": "json", "limit": limit, "addressdetails": 0},
@@ -34,6 +52,22 @@ def geocode(query: str, limit: int = 5) -> list[dict]:
         {"label": r["display_name"], "lat": float(r["lat"]), "lon": float(r["lon"])}
         for r in resp.json()
     ]
+
+
+def geocode(query: str, limit: int = 5) -> list[dict]:
+    """Free-text place search -> [{label, lat, lon}].
+
+    Photon first: Nominatim's public server rate-limits shared cloud
+    egress IPs (HTTP 429 from hosts like Render), which would leave the
+    place search unusable in production. Nominatim stays as fallback.
+    """
+    try:
+        results = _geocode_photon(query, limit)
+        if results:
+            return results
+    except requests.RequestException:
+        pass
+    return _geocode_nominatim(query, limit)
 
 
 # ---------------------------------------------------------------- routing
