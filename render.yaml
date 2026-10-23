@@ -24,7 +24,6 @@ services:
     name: routeguard-web
     env: static
     rootDir: frontend
-    plan: free
     buildCommand: npm install && npm run build
     staticPublishPath: dist
     envVars:
