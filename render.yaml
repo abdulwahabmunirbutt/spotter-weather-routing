@@ -30,4 +30,4 @@ services:
       # Replace with the real backend URL after the API service deploys,
       # e.g. https://routeguard-api.onrender.com/api
       - key: VITE_API_BASE
-        value: https://routeguard-api.onrender.com/api
+        value: https://routeguard-api-6ptc.onrender.com/api
