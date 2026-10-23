@@ -5,6 +5,7 @@ POST /api/geocode — place search (Nominatim)
 POST /api/plan    — routes + ETA-based weather sampling + risk + recommendation
 POST /api/weather — re-score checkpoints at shifted ETAs (forecast slider)
 """
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import requests
@@ -24,6 +25,28 @@ def upstream_error(exc: Exception) -> Response:
         {"error": f"Upstream service unavailable, please retry shortly. ({exc})"},
         status=502,
     )
+
+
+def _enrich_route(route: dict, departure, sample_miles: float, load_lb: float) -> dict:
+    """Sample checkpoints along one route, fetch their weather, score risk."""
+    cps = sample_checkpoints(
+        route["geometry"], route["duration_sec"], departure, sample_miles
+    )
+    weather = fetch_weather_batch(cps)
+    for cp, w in zip(cps, weather):
+        score_checkpoint(cp, w, load_lb)
+        cp["eta_iso"] = cp.pop("eta").isoformat()
+    summary = summarize(cps)
+    return {
+        "id": route["id"],
+        "distance_mi": route["distance_mi"],
+        "duration_min": round(route["duration_sec"] / 60),
+        "duration_sec": route["duration_sec"],
+        "geometry": route["geometry"],
+        "checkpoints": cps,
+        "summary": summary,
+        "avg_risk": summary["avg_risk"],
+    }
 
 
 def score_checkpoint(cp: dict, weather: dict, load_lb: float) -> dict:
@@ -82,27 +105,15 @@ def plan_view(request):
 
     try:
         routes = fetch_routes(origin, destination)
-        enriched = []
-        for route in routes:
-            cps = sample_checkpoints(
-                route["geometry"], route["duration_sec"], departure, sample_miles
-            )
-            weather = fetch_weather_batch(cps)
-            for cp, w in zip(cps, weather):
-                score_checkpoint(cp, w, load_lb)
-                cp["eta_iso"] = cp.pop("eta").isoformat()
-            summary = summarize(cps)
-            enriched.append(
-                {
-                    "id": route["id"],
-                    "distance_mi": route["distance_mi"],
-                    "duration_min": round(route["duration_sec"] / 60),
-                    "duration_sec": route["duration_sec"],
-                    "geometry": route["geometry"],
-                    "checkpoints": cps,
-                    "summary": summary,
-                    "avg_risk": summary["avg_risk"],
-                }
+        # Enrich routes concurrently: each route's weather batch is an
+        # independent upstream call, so running them in parallel cuts the
+        # response time roughly to the slowest single route.
+        with ThreadPoolExecutor(max_workers=len(routes) or 1) as pool:
+            enriched = list(
+                pool.map(
+                    lambda r: _enrich_route(r, departure, sample_miles, load_lb),
+                    routes,
+                )
             )
     except (requests.RequestException, RuntimeError) as exc:
         return upstream_error(exc)

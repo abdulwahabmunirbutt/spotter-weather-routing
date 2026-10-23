@@ -11,6 +11,13 @@ import L from "leaflet";
 import "leaflet.heat";
 import { geocode, planRoute, rescoreWeather } from "./api";
 
+const PLAN_STEPS = [
+  "Finding routes…",
+  "Sampling weather along the corridor…",
+  "Scoring risk for each route…",
+  "Picking the safest route…",
+];
+
 const RISK_LEVELS = [
   { label: "Low", color: "#22c55e" },
   { label: "Moderate", color: "#eab308" },
@@ -90,6 +97,19 @@ export default function App() {
   const [showHeat, setShowHeat] = useState(true);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [loadingKind, setLoadingKind] = useState("plan");
+  const [stepIdx, setStepIdx] = useState(0);
+
+  // Cycle the progress narration while a plan is being computed.
+  useEffect(() => {
+    if (!loading || loadingKind !== "plan") return;
+    setStepIdx(0);
+    const t = setInterval(
+      () => setStepIdx((i) => Math.min(i + 1, PLAN_STEPS.length - 1)),
+      1600
+    );
+    return () => clearInterval(t);
+  }, [loading, loadingKind]);
   const [error, setError] = useState("");
   const [selected, setSelected] = useState(null);
 
@@ -126,6 +146,7 @@ export default function App() {
       return;
     }
     setLoading(true);
+    setLoadingKind("plan");
     setError("");
     setResult(null);
     try {
@@ -159,6 +180,7 @@ export default function App() {
       const route = resultRef.current?.routes.find((r) => r.id === selected);
       if (!route) return;
       setLoading(true);
+      setLoadingKind("weather");
       setError("");
       try {
         const t0 = new Date(route.checkpoints[0].eta_iso).getTime();
@@ -298,7 +320,13 @@ export default function App() {
         </label>
 
         <button onClick={handlePlan} disabled={loading}>
-          {loading ? "Planning…" : "Find safest route"}
+          {loading && loadingKind === "plan" ? (
+            <>
+              <span className="btnspin" /> Planning…
+            </>
+          ) : (
+            "Find safest route"
+          )}
         </button>
         {error && <p className="error">⚠️ {error}</p>}
 
@@ -468,7 +496,21 @@ export default function App() {
           </label>
         </div>
 
-        {loading && <div className="maploading">⏳ Working…</div>}
+        {loading && (
+          <div className="maploading rich">
+            <div className="loadrow">
+              <span className="spinner" />
+              <span>
+                {loadingKind === "plan"
+                  ? PLAN_STEPS[stepIdx]
+                  : "Re-checking weather…"}
+              </span>
+            </div>
+            <div className="loadbar">
+              <div className="loadbar-fill" />
+            </div>
+          </div>
+        )}
         {!result && !loading && (
           <div className="maphint">
             Enter an origin and destination, then “Find safest route”.
